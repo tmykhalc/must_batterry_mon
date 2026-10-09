@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="uk">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Must LP16-48100 Battery</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+      body { background: #1a1a1a; color: #fff; font-family: sans-serif; margin: 0; padding: 10px; }
+      h1 { font-size: 18px; margin: 0 0 10px; font-weight: 600; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 15px; }
+      .wide { grid-column: 1 / -1; }
+      .card { background: #2d2d2d; padding: 15px; border-radius: 8px; }
+      .card h2 { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: #aaa; text-transform: uppercase; letter-spacing: 0.5px; }
+      .big { font-size: 34px; font-weight: 700; }
+      .unit { font-size: 15px; color: #aaa; margin-left: 4px; }
+      .sub { color: #aaa; font-size: 13px; margin-top: 4px; }
+      .row { display: flex; gap: 20px; flex-wrap: wrap; }
+      .row > div { min-width: 90px; }
+      .ring { --p: 0; --c: #4caf50; width: 130px; height: 130px; border-radius: 50%; margin: 0 auto;
+        background: conic-gradient(var(--c) calc(var(--p) * 1%), #444 0); display: grid; place-items: center; }
+      .ring::before { content: ""; position: absolute; }
+      .ring .inner { width: 100px; height: 100px; border-radius: 50%; background: #2d2d2d; display: grid; place-items: center; font-size: 28px; font-weight: 700; }
+      .green { color: #4caf50; } .amber { color: #ffb300; } .red { color: #f44336; }
+      #alarm { display: none; background: #b71c1c; padding: 10px 15px; border-radius: 8px; margin-bottom: 15px; font-weight: 600; }
+      .temps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+      .temps div { background: #383838; border-radius: 6px; padding: 8px; text-align: center; }
+      .temps small { display: block; color: #aaa; font-size: 11px; }
+      .chart { position: relative; height: 220px; }
+      #updated { color: #888; font-size: 12px; margin-top: 10px; text-align: right; }
+    </style>
+  </head>
+  <body>
+    <h1>Must LP16-48100 Battery</h1>
+    <div id="alarm">BMS alarm active</div>
+    <div class="grid">
+      <div class="card">
+        <h2>State of charge</h2>
+        <div class="ring" id="ring"><div class="inner" id="soc">–</div></div>
+        <div class="sub" style="text-align:center" id="capacity">–</div>
+      </div>
+      <div class="card">
+        <h2>Pack</h2>
+        <div class="row">
+          <div><div class="big" id="voltage">–</div><div class="sub">volts</div></div>
+          <div><div class="big" id="current">–</div><div class="sub">amps</div></div>
+          <div><div class="big" id="power">–</div><div class="sub">watts</div></div>
+        </div>
+        <div class="sub" id="cycles">–</div>
+      </div>
+      <div class="card">
+        <h2>Cell spread</h2>
+        <div class="big" id="delta">–</div>
+        <div class="sub" id="minmax">–</div>
+      </div>
+      <div class="card">
+        <h2>Temperatures</h2>
+        <div class="temps" id="temps"></div>
+      </div>
+      <div class="card wide">
+        <h2>Cell voltages</h2>
+        <div class="chart"><canvas id="cellChart"></canvas></div>
+      </div>
+      <div class="card"><h2>SOC (24 h)</h2><div class="chart"><canvas id="socChart"></canvas></div></div>
+      <div class="card"><h2>Cell delta, mV (24 h)</h2><div class="chart"><canvas id="deltaChart"></canvas></div></div>
+      <div class="card wide"><h2>Cell min / max, V (24 h)</h2><div class="chart"><canvas id="minmaxChart"></canvas></div></div>
+    </div>
+    <div id="updated">–</div>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const fmt = (v, d) => (v === null || v === undefined ? "–" : Number(v).toFixed(d));
+      Chart.defaults.color = "#bbb";
+      Chart.defaults.borderColor = "#444";
+      Chart.defaults.animation = false;
+
+      const cellChart = new Chart($("cellChart"), {
+        type: "bar",
+        data: { labels: [], datasets: [{ data: [], backgroundColor: [] }] },
+        options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: false } } }
+      });
+
+      const lineOpts = (extra) => ({ maintainAspectRatio: false, elements: { point: { radius: 0 }, line: { borderWidth: 2, tension: 0.2 } },
+        scales: { x: { ticks: { maxTicksLimit: 6 } } }, plugins: { legend: { display: extra.legend || false } }, ...extra.opts });
+      const line = (id, datasets, extra = {}) => new Chart($(id), { type: "line", data: { labels: [], datasets }, options: lineOpts(extra) });
+      const socChart = line("socChart", [{ label: "SOC %", data: [], borderColor: "#4caf50" }], { opts: { scales: { y: { min: 0, max: 100 } } } });
+      const deltaChart = line("deltaChart", [{ label: "Δ mV", data: [], borderColor: "#ffb300" }], { opts: { scales: { y: { beginAtZero: true } } } });
+      const minmaxChart = line("minmaxChart", [
+        { label: "min", data: [], borderColor: "#42a5f5" },
+        { label: "max", data: [], borderColor: "#ef5350" }
+      ], { legend: true });
+
+      function setLine(chart, labels, ...series) {
+        chart.data.labels = labels;
+        series.forEach((s, i) => (chart.data.datasets[i].data = s));
+        chart.update();
+      }
+
+      async function refreshStatus() {
+        const s = await (await fetch("api/status")).json();
+        if (s.soc === undefined) { $("updated").textContent = "Waiting for first BMS reading…" + (s.last_error ? " (" + s.last_error + ")" : ""); return; }
+        $("soc").textContent = s.soc + "%";
+        const ring = $("ring");
+        ring.style.setProperty("--p", s.soc);
+        ring.style.setProperty("--c", s.soc < 20 ? "#f44336" : s.soc < 40 ? "#ffb300" : "#4caf50");
+        $("capacity").textContent = fmt(s.remaining_ah, 1) + " / " + fmt(s.full_ah, 0) + " Ah";
+        $("voltage").textContent = fmt(s.voltage, 2);
+        $("current").textContent = fmt(s.current, 1);
+        $("power").textContent = fmt(s.power, 0);
+        $("cycles").textContent = "Cycles: " + (s.cycles ?? "–");
+        const d = s.cell_delta_mv;
+        $("delta").textContent = d + " mV";
+        $("delta").className = "big " + (d < 100 ? "green" : d <= 250 ? "amber" : "red");
+        $("minmax").textContent = "min " + fmt(s.cell_min, 3) + " V (#" + s.cell_min_index + ")  ·  max " + fmt(s.cell_max, 3) + " V (#" + s.cell_max_index + ")";
+        $("temps").innerHTML = s.temps.map((t, i) => "<div><small>T" + (i + 1) + "</small>" + fmt(t, 1) + " °C</div>").join("");
+        $("alarm").style.display = s.alarm ? "block" : "none";
+
+        const lo = Math.min(...s.cells), hi = Math.max(...s.cells);
+        cellChart.data.labels = s.cells.map((_, i) => String(i + 1));
+        cellChart.data.datasets[0].data = s.cells;
+        cellChart.data.datasets[0].backgroundColor = s.cells.map((v) => (v === lo ? "#42a5f5" : v === hi ? "#ef5350" : "#78909c"));
+        cellChart.options.scales.y.min = Math.floor((lo - 0.05) * 100) / 100;
+        cellChart.options.scales.y.max = Math.ceil((hi + 0.05) * 100) / 100;
+        cellChart.update();
+
+        $("updated").textContent = "Updated " + s.age_s + " s ago" + (s.last_error ? " · last error: " + s.last_error : "");
+      }
+
+      async function refreshHistory() {
+        const h = await (await fetch("api/history?hours=24")).json();
+        const labels = h.map((p) => new Date(p.t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+        setLine(socChart, labels, h.map((p) => p.soc));
+        setLine(deltaChart, labels, h.map((p) => p.cell_delta_mv));
+        setLine(minmaxChart, labels, h.map((p) => p.cell_min), h.map((p) => p.cell_max));
+      }
+
+      const safe = (fn) => fn().catch((e) => ($("updated").textContent = "Error: " + e.message));
+      safe(refreshStatus); safe(refreshHistory);
+      setInterval(() => safe(refreshStatus), 5000);
+      setInterval(() => safe(refreshHistory), 60000);
+    </script>
+  </body>
+</html>

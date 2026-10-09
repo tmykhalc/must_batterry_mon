@@ -244,7 +244,7 @@ Publish on **every** MQTT (re)connect, with `retain: true` and `qos: 1`.
 
 | Component | Key | Name | device_class | Unit | state_class | Category |
 |---|---|---|---|---|---|---|
-| sensor | soc | Battery SOC | battery | % | measurement | |
+| sensor | soc | SOC | battery | % | measurement | |
 | sensor | soc_calc | SOC (calculated) | battery | % | measurement | diagnostic |
 | sensor | voltage | Voltage | voltage | V | measurement | |
 | sensor | current | Current | current | A | measurement | |

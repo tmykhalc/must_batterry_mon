@@ -17,7 +17,7 @@ const pad = (n) => String(n).padStart(2, "0");
 // [component, key, name, device_class, unit, state_class, entity_category, display_precision]
 function entities(cells = 16, temps = 6) {
   const list = [
-    ["sensor", "soc", "Battery SOC", "battery", "%", "measurement", null, 0],
+    ["sensor", "soc", "SOC", "battery", "%", "measurement", null, 0],
     ["sensor", "soc_calc", "SOC (calculated)", "battery", "%", "measurement", "diagnostic", 1],
     ["sensor", "voltage", "Voltage", "voltage", "V", "measurement", null, 2],
     ["sensor", "current", "Current", "current", "A", "measurement", null, 2],
